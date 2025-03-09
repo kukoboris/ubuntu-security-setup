@@ -122,14 +122,17 @@ fi
 read -p "Добавить публичный SSH ключ для пользователя $NEW_USER? (y/n): " -n 1 -r
 echo ""
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    read -p "Введите ваш публичный SSH ключ: " SSH_KEY
-    # Валидация SSH ключа
-    if [[ "$SSH_KEY" =~ ^ssh-(rsa|dss|ecdsa|ed25519)\ [A-Za-z0-9+/=]+\ ([^@]+@[^@]+)?$ ]]; then
-        echo "$SSH_KEY" >> "/home/$NEW_USER/.ssh/authorized_keys"
-        check_status "Добавление SSH ключа для $NEW_USER" || exit 1
-else
-        print_error "Некорректный SSH ключ. Пропускаем."
-    fi
+    while true; do
+        read -p "Введите ваш публичный SSH ключ: " SSH_KEY
+        # Валидация SSH ключа
+        if [[ "$SSH_KEY" =~ ^ssh-(rsa|dss|ecdsa|ed25519)\ [A-Za-z0-9+/=]+\ ([^@]+@[^@]+)?$ ]]; then
+            echo "$SSH_KEY" >> "/home/$NEW_USER/.ssh/authorized_keys"
+            check_status "Добавление SSH ключа для $NEW_USER" || exit 1
+            break
+        else
+            print_error "Некорректный SSH ключ. Убедитесь, что ключ начинается с 'ssh-rsa', 'ssh-dss', 'ecdsa', или 'ed25519' и содержит правильный набор символов."
+        fi
+    done
 fi
 
 # 3 и 4. Настройка SSH
