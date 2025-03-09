@@ -124,10 +124,10 @@ echo ""
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     read -p "Введите ваш публичный SSH ключ: " SSH_KEY
     # Валидация SSH ключа
-    if [[ "$SSH_KEY" =~ ^ssh-rsa\ AAAA[0-9A-Za-z+/]+[=]{0,3}(\ [^@]+@[^@]+)?$ ]]; then
+    if [[ "$SSH_KEY" =~ ^ssh-(rsa|dss|ecdsa|ed25519)\ [A-Za-z0-9+/=]+\ ([^@]+@[^@]+)?$ ]]; then
         echo "$SSH_KEY" >> "/home/$NEW_USER/.ssh/authorized_keys"
         check_status "Добавление SSH ключа для $NEW_USER" || exit 1
-    else
+else
         print_error "Некорректный SSH ключ. Пропускаем."
     fi
 fi
