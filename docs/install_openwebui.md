@@ -78,28 +78,28 @@ sudo ./install_openwebui.sh
 ### Остановка сервиса
 
 ```bash
-cd /путь/к/директории/с/docker-compose.yml
+cd /opt/open-webui/docker-compose.yml
 docker-compose down
 ```
 
 ### Перезапуск сервиса
 
 ```bash
-cd /путь/к/директории/с/docker-compose.yml
+cd /opt/open-webui/docker-compose.yml
 docker-compose restart
 ```
 
 ### Просмотр логов
 
 ```bash
-cd /путь/к/директории/с/docker-compose.yml
+cd /opt/open-webui/docker-compose.yml
 docker-compose logs
 ```
 
 ### Отключение автоматического обновления
 
 ```bash
-cd /путь/к/директории/с/docker-compose.yml
+cd /opt/open-webui/docker-compose.yml
 docker-compose stop watchtower
 ```
 
