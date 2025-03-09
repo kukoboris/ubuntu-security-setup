@@ -43,13 +43,13 @@ wget https://raw.githubusercontent.com/kukoboris/ubuntu-security-setup/refs/head
 ### Шаг 2: Сделайте скрипт исполняемым
 
 ```bash
-chmod +x install-open-webui.sh
+chmod +x install_openwebui.sh
 ```
 
 ### Шаг 3: Запустите скрипт с правами администратора
 
 ```bash
-sudo ./install-open-webui.sh
+sudo ./install_openwebui.sh
 ```
 
 ### Шаг 4: Следуйте инструкциям в консоли
