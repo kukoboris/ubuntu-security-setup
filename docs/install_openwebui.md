@@ -38,7 +38,7 @@
 ### Шаг 1: Скачайте скрипт
 
 ```bash
-wget https://raw.githubusercontent.com/username/repo/main/install-open-webui.sh
+wget https://raw.githubusercontent.com/kukoboris/ubuntu-security-setup/refs/heads/main/docs/install_openwebui.sh
 ```
 
 ### Шаг 2: Сделайте скрипт исполняемым
