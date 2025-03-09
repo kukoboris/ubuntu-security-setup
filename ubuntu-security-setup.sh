@@ -125,12 +125,12 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     while true; do
         read -p "Введите ваш публичный SSH ключ: " SSH_KEY
         # Валидация SSH ключа
-        if [[ "$SSH_KEY" =~ ^ssh-(rsa|dss|ecdsa|ed25519)\ [A-Za-z0-9+/=]+\ ([^@]+@[^@]+)?$ ]]; then
+        if [[ "$SSH_KEY" =~ ^ssh-(rsa|dss|ed25519|(ecdsa-sha2-nistp(256|384|521)))\ [A-Za-z0-9+/=_-]+\ .* ]]; then
             echo "$SSH_KEY" >> "/home/$NEW_USER/.ssh/authorized_keys"
             check_status "Добавление SSH ключа для $NEW_USER" || exit 1
             break
         else
-            print_error "Некорректный SSH ключ. Убедитесь, что ключ начинается с 'ssh-rsa', 'ssh-dss', 'ecdsa', или 'ed25519' и содержит правильный набор символов."
+            print_error "Некорректный SSH ключ. Убедитесь, что ключ начинается с 'ssh-rsa', 'ssh-dss', 'ecdsa', или 'ssh-ed25519' и содержит правильный набор символов."
         fi
     done
 fi
