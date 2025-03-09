@@ -140,6 +140,8 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     # Валидация SSH ключа
     if ssh-keygen -l -f "$temp_file" > /dev/null 2>&1; then
         echo "✅ SSH ключ валиден."
+        echo "$SSH_KEY" >> "/home/$NEW_USER/.ssh/authorized_keys"
+        check_status "Добавление SSH ключа для $NEW_USER"
         rm -f "$temp_file"
         break
     else
