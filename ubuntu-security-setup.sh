@@ -252,17 +252,22 @@ else
     print_success "Fail2ban уже установлен."
 fi
 
-# Создание локальной конфигурации fail2ban
+# Создание локальной конфигурации fail2ban с улучшенными параметрами
 cat > /etc/fail2ban/jail.local << EOF
 [DEFAULT]
 # Банить IP на 1 час (3600 секунд)
 bantime = 3600
+# Увеличивать время бана для рецидивистов
+bantime.increment = true
+bantime.factor = 1
+bantime.formula = ban.Time * (1.0 + ban.Count) * banFactor
+bantime.maxtime = 604800  # 1 неделя
 # Время (в секундах) для поиска попыток
 findtime = 600
 # Количество попыток до бана
-maxretry = 3
+maxretry = 5
 # Игнорировать IP адреса локальной сети
-ignoreip = 127.0.0.1/8 ::1
+ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
 
 # Настройка защиты SSH
 [sshd]
