@@ -39,8 +39,8 @@ fi
 # Запрос параметров у пользователя
 read -p "Введите ваш OpenAI API ключ: " OPENAI_API_KEY
 
-read -p "Введите порт для Open WebUI (по умолчанию 8555): " APP_PORT
-APP_PORT=${APP_PORT:-8555}
+read -p "Введите порт для Open WebUI (по умолчанию 3025): " APP_PORT
+APP_PORT=${APP_PORT:-3025}
 
 read -p "Введите URL для Ollama API (оставьте пустым, если не используете): " OLLAMA_API_ENDPOINT
 
