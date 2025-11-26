@@ -1,54 +1,80 @@
 #!/bin/bash
 set -e
 
-# 1. Включаем IP Forwarding (рекомендуется для Tailscale)
-echo "Enabling IP forwarding..."
-echo 'net.ipv4.ip_forward = 1' | sudo tee -a /etc/sysctl.d/99-tailscale.conf
+# --- 1. Настройка ядра (важно для VPN) ---
+echo ">>> Enabling IP forwarding..."
+# Включаем пересылку пакетов. Без этого Linux может сбрасывать VPN-трафик.
+echo 'net.ipv4.ip_forward = 1' | sudo tee /etc/sysctl.d/99-tailscale.conf
 echo 'net.ipv6.conf.all.forwarding = 1' | sudo tee -a /etc/sysctl.d/99-tailscale.conf
 sudo sysctl -p /etc/sysctl.d/99-tailscale.conf
 
-# 2. Установка Tailscale (используем официальный скрипт для автоопределения ОС)
-echo "Installing Tailscale..."
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# 3. Запуск и авторизация
-# Скрипт остановится здесь и даст ссылку. Вам нужно перейти по ней в браузере.
-echo "Starting Tailscale. Please authenticate via the link below..."
-sudo tailscale up
-
-# 4. Настройка UFW (Firewall)
-echo "Configuring Firewall..."
-
-# Разрешаем UDP порт 41641 для прямых P2P соединений (Direct Connections)
-# Это улучшает скорость и уменьшает задержки
-sudo ufw allow 41641/udp comment 'Tailscale Peer-to-Peer'
-
-# Разрешаем весь входящий трафик ТОЛЬКО через интерфейс Tailscale
-# Это включает в себя и SSH (порт 22 или ваш кастомный), но только если заходить через Tailscale IP
-sudo ufw allow in on tailscale0 comment 'Allow all traffic via Tailscale VPN'
-
-# 5. Закрытие публичного доступа к SSH
-# Находим текущий порт SSH из конфига
-SSH_PORT=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}' | head -n 1)
-if [ -z "$SSH_PORT" ]; then 
-    SSH_PORT=22 
+# --- 2. Установка Tailscale ---
+if ! command -v tailscale &> /dev/null; then
+    echo ">>> Installing Tailscale..."
+    # Используем официальный скрипт - он самый надежный
+    curl -fsSL https://tailscale.com/install.sh | sh
+else
+    echo ">>> Tailscale already installed."
 fi
 
-echo "Removing public access rules for SSH port $SSH_PORT..."
+# --- 3. Запуск VPN ---
+echo ">>> Starting Tailscale. Please authenticate via the link below..."
+# --advertise-exit-node: Позволяет серверу работать как шлюз (Exit Node). 
+# Это не включает ничего опасного само по себе, но дает вам выбор в будущем.
+sudo tailscale up --advertise-exit-node
 
-# Удаляем правила, разрешающие доступ к SSH из интернета
-# (При этом доступ через tailscale0 останется благодаря правилу выше)
+# --- 4. ПРОВЕРКА (Safety Net) ---
+echo ">>> Verifying connection..."
+# Получаем IP адрес внутри сети VPN
+TS_IP=$(tailscale ip -4)
+
+if [[ -z "$TS_IP" ]]; then
+    echo "ERROR: Tailscale did not get an IP address!" 
+    echo "ABORTING script to prevent lockout. Firewall was NOT changed."
+    exit 1
+fi
+echo ">>> Success! Your VPN IP is: $TS_IP"
+
+# --- 5. Тюнинг SSH (защита от зависания сессий) ---
+echo ">>> Tuning SSH keepalive..."
+# VPN может "замирать" без активности. Это заставит SSH поддерживать связь.
+if ! grep -q "ClientAliveInterval" /etc/ssh/sshd_config; then
+    echo "ClientAliveInterval 60" | sudo tee -a /etc/ssh/sshd_config
+    echo "ClientAliveCountMax 3" | sudo tee -a /etc/ssh/sshd_config
+    sudo systemctl restart ssh
+fi
+
+# --- 6. Настройка Фаервола (UFW) ---
+echo ">>> Configuring Firewall..."
+
+# Шаг А: Разрешаем трафик ВНУТРИ трубы VPN
+# Это открывает доступ к SSH, но только если вы подключены к Tailscale.
+sudo ufw allow in on tailscale0 comment 'Allow all traffic via Tailscale VPN'
+
+# Шаг Б: Оптимизация (UDP для скорости)
+sudo ufw allow 41641/udp comment 'Tailscale Peer-to-Peer'
+
+# Шаг В: Блокировка входа с "улицы"
+# Определяем, на каком торту сейчас висит SSH (стандарт 22 или ваш из прошлого скрипта)
+SSH_PORT=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}' | head -n 1)
+SSH_PORT=${SSH_PORT:-22} # Если не нашли, считаем 22
+
+echo ">>> Removing public INTERNET access for SSH port $SSH_PORT..."
+
+# Удаляем правила, которые разрешали вход всем подряд
 sudo ufw delete allow $SSH_PORT/tcp || true
 sudo ufw delete allow $SSH_PORT || true
 sudo ufw delete limit $SSH_PORT/tcp || true
 
-# Перезагружаем правила
+# Применяем изменения
 sudo ufw reload
 
-echo "Done!"
 echo "----------------------------------------------------------------"
-echo "WARNING: Public SSH access is now BLOCKED."
-echo "You can only connect via your Tailscale IP address."
-echo "Your Tailscale IP is:"
-tailscale ip -4
+echo "DONE! SEVER SECURED."
+echo ""
+echo "IMPORTANT:"
+echo "1. Public SSH access is now BLOCKED."
+echo "2. Connect from your PC using the Tailscale IP:"
+echo "   ssh user@$TS_IP" 
+echo "   (Or simply use the 'MagicDNS' name if configured)"
 echo "----------------------------------------------------------------"
