@@ -1,0 +1,54 @@
+#!/bin/bash
+set -e
+
+# 1. Включаем IP Forwarding (рекомендуется для Tailscale)
+echo "Enabling IP forwarding..."
+echo 'net.ipv4.ip_forward = 1' | sudo tee -a /etc/sysctl.d/99-tailscale.conf
+echo 'net.ipv6.conf.all.forwarding = 1' | sudo tee -a /etc/sysctl.d/99-tailscale.conf
+sudo sysctl -p /etc/sysctl.d/99-tailscale.conf
+
+# 2. Установка Tailscale (используем официальный скрипт для автоопределения ОС)
+echo "Installing Tailscale..."
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# 3. Запуск и авторизация
+# Скрипт остановится здесь и даст ссылку. Вам нужно перейти по ней в браузере.
+echo "Starting Tailscale. Please authenticate via the link below..."
+sudo tailscale up
+
+# 4. Настройка UFW (Firewall)
+echo "Configuring Firewall..."
+
+# Разрешаем UDP порт 41641 для прямых P2P соединений (Direct Connections)
+# Это улучшает скорость и уменьшает задержки
+sudo ufw allow 41641/udp comment 'Tailscale Peer-to-Peer'
+
+# Разрешаем весь входящий трафик ТОЛЬКО через интерфейс Tailscale
+# Это включает в себя и SSH (порт 22 или ваш кастомный), но только если заходить через Tailscale IP
+sudo ufw allow in on tailscale0 comment 'Allow all traffic via Tailscale VPN'
+
+# 5. Закрытие публичного доступа к SSH
+# Находим текущий порт SSH из конфига
+SSH_PORT=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}' | head -n 1)
+if [ -z "$SSH_PORT" ]; then 
+    SSH_PORT=22 
+fi
+
+echo "Removing public access rules for SSH port $SSH_PORT..."
+
+# Удаляем правила, разрешающие доступ к SSH из интернета
+# (При этом доступ через tailscale0 останется благодаря правилу выше)
+sudo ufw delete allow $SSH_PORT/tcp || true
+sudo ufw delete allow $SSH_PORT || true
+sudo ufw delete limit $SSH_PORT/tcp || true
+
+# Перезагружаем правила
+sudo ufw reload
+
+echo "Done!"
+echo "----------------------------------------------------------------"
+echo "WARNING: Public SSH access is now BLOCKED."
+echo "You can only connect via your Tailscale IP address."
+echo "Your Tailscale IP is:"
+tailscale ip -4
+echo "----------------------------------------------------------------"
