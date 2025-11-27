@@ -26,4 +26,4 @@
 Запустите установку одной командой, скачав скрипт напрямую из репозитория:
 
 ```bash
-wget -O install_librechat.sh https://raw.githubusercontent.com/ВАШ_НИКНЕЙМ/ВАШ_РЕПОЗИТОРИЙ/main/install_librechat.sh && chmod +x install_librechat.sh && sudo ./install_librechat.sh
+wget -O install_librechat.sh https://raw.githubusercontent.com/kukoboris/ubuntu-security-setup/refs/heads/main/docs/install_librechat.sh && chmod +x install_librechat.sh && sudo ./install_librechat.sh
