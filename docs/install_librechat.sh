@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==========================================
-# Автоматический установщик LibreChat (Native Override Support)
-# Версия: 2.5
+# Автоматический установщик LibreChat (Fix: Project Name & UID)
+# Версия: 2.6
 # ==========================================
 
 set -e
@@ -25,7 +25,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 clear
-echo -e "${GREEN}=== Установка LibreChat (v2.5) ===${NC}"
+echo -e "${GREEN}=== Установка LibreChat (v2.6) ===${NC}"
 echo ""
 
 # 2. Определение команды Docker Compose
@@ -88,6 +88,18 @@ cd "$INSTALL_DIR"
 log "Настройка .env..."
 cp .env.example .env
 
+# --- ИСПРАВЛЕНИЕ ОШИБОК DOCKER (v2.6) ---
+# Добавляем явное имя проекта, чтобы избежать ошибки "project name can't be empty"
+echo "COMPOSE_PROJECT_NAME=librechat" >> .env
+
+# Добавляем UID/GID, чтобы избежать WARN и проблем с правами
+# Получаем ID пользователя, который запустил sudo (SUDO_UID), или root (0)
+REAL_USER_ID=${SUDO_UID:-0}
+REAL_GROUP_ID=${SUDO_GID:-0}
+echo "UID=$REAL_USER_ID" >> .env
+echo "GID=$REAL_GROUP_ID" >> .env
+# ----------------------------------------
+
 # Ключи безопасности
 CREDS=$(openssl rand -hex 32)
 SIGN=$(openssl rand -hex 32)
@@ -101,7 +113,6 @@ echo -e ""
 echo -e "${YELLOW}--- Настройка ключей API ---${NC}"
 echo "Нажмите Enter, чтобы пропустить ввод ключа."
 
-# Функция для безопасного обновления ключа
 update_key() {
     local key_name=$1
     local key_value=$2
@@ -128,7 +139,6 @@ log "Ключи API сохранены."
 # 8. Настройка конфигов (YAML)
 log "Настройка конфигурационных файлов..."
 
-# 8.1 Создаем librechat.yaml из примера
 if [ ! -f "librechat.yaml" ]; then
     if [ -f "librechat.example.yaml" ]; then
         cp librechat.example.yaml librechat.yaml
@@ -138,18 +148,13 @@ if [ ! -f "librechat.yaml" ]; then
     fi
 fi
 
-# 8.2 Создаем docker-compose.override.yml из примера
 if [ -f "docker-compose.override.yml.example" ]; then
     cp docker-compose.override.yml.example docker-compose.override.yml
     log "Файл Override скопирован из официального примера."
 else
-    # Fallback, если примера вдруг нет
-    warn "docker-compose.override.yml.example не найден. Создаем с нуля..."
+    # Backup создание, если примера нет
     echo "version: '3.4'" > docker-compose.override.yml
-    echo "services:" >> docker-compose.override.yml
-    echo "  api:" >> docker-compose.override.yml
-    echo "    volumes:" >> docker-compose.override.yml
-    echo "      - ./librechat.yaml:/app/librechat.yaml" >> docker-compose.override.yml
+    echo "services: { api: { volumes: ['./librechat.yaml:/app/librechat.yaml'] } }" >> docker-compose.override.yml
 fi
 
 # 9. Проверка и настройка порта
@@ -162,15 +167,11 @@ if netstat -tuln | grep -q ":$DEFAULT_PORT "; then
     read -p "Сменить порт LibreChat на 3081? (y/n): " port_change
     if [[ "$port_change" == "y" ]]; then
         TARGET_PORT=3081
-        
-        # Добавляем настройку порта в конец override файла
-        # Важно: соблюдаем отступы (4 пробела), так как это вложенность services -> api
         echo "    ports:" >> docker-compose.override.yml
         echo "      - \"3081:3080\"" >> docker-compose.override.yml
-        
-        log "Порт изменен на 3081 в docker-compose.override.yml"
+        log "Порт изменен на 3081."
     else
-        err "Освободите порт $DEFAULT_PORT и перезапустите скрипт."
+        err "Освободите порт $DEFAULT_PORT."
         exit 1
     fi
 else
@@ -180,23 +181,18 @@ fi
 # 10. Запуск
 echo -e ""
 log "Запуск контейнеров..."
-$DOCKER_COMPOSE_CMD up -d
+# Добавляем явное указание имени проекта и файла .env для перестраховки
+$DOCKER_COMPOSE_CMD --env-file .env up -d
 
 # 11. Финал
 echo -e ""
 echo -e "${GREEN}====================================================${NC}"
-echo -e "${GREEN}   LibreChat успешно установлен! (v2.5)   ${NC}"
+echo -e "${GREEN}   LibreChat успешно установлен! (v2.6)   ${NC}"
 echo -e "${GREEN}====================================================${NC}"
 echo -e ""
 echo -e "Адрес сервиса:     ${YELLOW}http://localhost:$TARGET_PORT${NC}"
 echo -e "Папка установки:   $INSTALL_DIR"
 echo -e ""
-echo -e "Ключевые файлы:"
-echo -e "  [Конфиг моделей] $INSTALL_DIR/librechat.yaml"
-echo -e "  [Ключи API]      $INSTALL_DIR/.env"
-echo -e "  [Docker Override] $INSTALL_DIR/docker-compose.override.yml"
-echo -e ""
-echo -e "Команды управления:"
-echo -e "  Перезапуск:      cd $INSTALL_DIR && $DOCKER_COMPOSE_CMD restart"
-echo -e "  Логи:            cd $INSTALL_DIR && $DOCKER_COMPOSE_CMD logs -f"
+echo -e "Если ошибка Project Name возникнет снова, выполните:"
+echo -e "cd $INSTALL_DIR && $DOCKER_COMPOSE_CMD up -d"
 echo -e ""
