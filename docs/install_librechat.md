@@ -27,3 +27,32 @@
 
 ```bash
 wget -O install_librechat.sh https://raw.githubusercontent.com/kukoboris/ubuntu-security-setup/refs/heads/main/docs/install_librechat.sh && chmod +x install_librechat.sh && sudo ./install_librechat.sh
+```
+
+## 🛠 Настройка после установки
+
+1. Останавливаем запущенные контейнеры
+```bash
+cd /opt/LibreChat && docker-compose down
+```
+2. Создаём файл настроек из образца
+```bash
+sudo cp librechat.example.yaml librechat.yaml
+```
+3. Создаём файл override из образца
+```bash
+sudo cp docker-compose.override.yml.example docker-compose.override.yml
+```
+4. Прописываем необходимые ключи в файле .env
+```bash
+sudo nano .env
+```
+5. В файле override расскомментить монтирование файла librechat.yaml в контейнер
+```bash
+sudo nano docker-compose.override.yml
+```
+6. Запускаем сервис
+```bash
+sudo docker-compose up -d
+```  
+   
