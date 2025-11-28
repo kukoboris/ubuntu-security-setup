@@ -48,8 +48,13 @@ sudo nano .env
 ```bash
 sudo nano docker-compose.override.yml
 ```
+<img width="740" height="225" alt="изображение" src="https://github.com/user-attachments/assets/8dbf6ba6-0743-4776-8a25-e7c749bc81ca" />
+
+
 6. Запускаем сервис
 ```bash
 sudo docker-compose up -d
 ```  
-   
+
+
+
