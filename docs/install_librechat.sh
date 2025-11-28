@@ -1,11 +1,10 @@
 #!/bin/bash
 
 # ==========================================
-# Автоматический установщик LibreChat (Cloudflare Tunnel + Compatibility Mode)
-# Версия: 2.2
+# Автоматический установщик LibreChat (Config & Tunnel Ready)
+# Версия: 2.3
 # ==========================================
 
-# Остановка при ошибках
 set -e
 
 # Цвета
@@ -26,42 +25,37 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 clear
-echo -e "${GREEN}=== Установка LibreChat (Universal) ===${NC}"
+echo -e "${GREEN}=== Установка LibreChat (v2.3) ===${NC}"
 echo ""
 
 # 2. Определение команды Docker Compose
 log "Определение версии Docker Compose..."
 if docker compose version >/dev/null 2>&1; then
     DOCKER_COMPOSE_CMD="docker compose"
-    log "Обнаружен плагин CLI (используем 'docker compose')"
+    log "Используем: docker compose"
 elif command -v docker-compose >/dev/null 2>&1; then
     DOCKER_COMPOSE_CMD="docker-compose"
-    log "Обнаружен бинарный файл (используем 'docker-compose')"
+    log "Используем: docker-compose"
 else
-    err "Docker Compose не найден ни в одном из вариантов."
-    err "Пожалуйста, установите docker-compose-plugin или docker-compose."
+    err "Docker Compose не найден. Установите docker-compose-plugin."
     exit 1
 fi
 
 # 3. Проверка AVX (для MongoDB)
-log "Проверка поддержки AVX..."
+log "Проверка процессора..."
 if grep -q avx /proc/cpuinfo || grep -q avx2 /proc/cpuinfo; then
-    echo -e "   - Процессор поддерживает AVX (OK)"
+    echo -e "   - AVX поддерживается (OK)"
 else
     warn "AVX не найден. MongoDB 5.0+ может не запуститься."
     read -p "Продолжить? (y/n): " avx_choice
     if [[ "$avx_choice" != "y" ]]; then exit 1; fi
 fi
 
-# 4. Обновление и зависимости
-log "Проверка системных утилит..."
-# Устанавливаем только если каких-то нет, чтобы не тормозить процесс
+# 4. Проверка утилит
 if ! command -v git &> /dev/null || ! command -v curl &> /dev/null || ! command -v netstat &> /dev/null; then
-    log "Установка недостающих пакетов (git, curl, net-tools)..."
+    log "Установка системных утилит..."
     apt-get update -qq
     apt-get install -y curl git openssl net-tools sed grep > /dev/null
-else
-    log "Все необходимые утилиты найдены."
 fi
 
 # 5. Папка установки
@@ -72,16 +66,15 @@ INSTALL_DIR=${INSTALL_DIR:-$DEFAULT_DIR}
 
 if [ -d "$INSTALL_DIR" ]; then
     warn "Папка $INSTALL_DIR существует."
-    read -p "Удалить старую версию и переустановить? (y/n): " reinstall
+    read -p "Переустановить с удалением старых данных? (y/n): " reinstall
     if [[ "$reinstall" == "y" ]]; then
-        # Пытаемся остановить старые контейнеры
         cd "$INSTALL_DIR"
         $DOCKER_COMPOSE_CMD down > /dev/null 2>&1 || true
         cd /
         rm -rf "$INSTALL_DIR"
-        log "Старая папка очищена."
+        log "Старая папка удалена."
     else
-        err "Установка отменена пользователем."
+        err "Установка отменена."
         exit 1
     fi
 fi
@@ -91,11 +84,11 @@ log "Клонирование репозитория..."
 git clone https://github.com/danny-avila/LibreChat.git "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-# 7. Настройка конфига
+# 7. Настройка окружения (.env)
 log "Настройка .env..."
 cp .env.example .env
 
-# Генерация ключей
+# Ключи безопасности
 CREDS=$(openssl rand -hex 32)
 SIGN=$(openssl rand -hex 32)
 
@@ -104,58 +97,81 @@ sed -i '/^SIGN_KEY=/d' .env
 echo "CREDS_KEY=$CREDS" >> .env
 echo "SIGN_KEY=$SIGN" >> .env
 
-# Ввод OpenAI Key
+# OpenAI API Key
 echo -e ""
-echo -e "${YELLOW}Настройка API:${NC}"
 read -p "Введите OpenAI API Key (или Enter для пропуска): " OPENAI_KEY
-
 if [ ! -z "$OPENAI_KEY" ]; then
     if grep -q "OPENAI_API_KEY=" .env; then
         sed -i "s|^#\?OPENAI_API_KEY=.*|OPENAI_API_KEY=$OPENAI_KEY|" .env
     else
         echo "OPENAI_API_KEY=$OPENAI_KEY" >> .env
     fi
-    log "API Key сохранен."
 fi
 
-# 8. Проверка порта
-log "Проверка доступности порта 3080..."
-if netstat -tuln | grep -q ":3080 "; then
-    warn "Порт 3080 занят!"
+# 8. Настройка librechat.yaml и docker-compose.override.yml
+log "Настройка конфигурации (librechat.yaml)..."
+
+# Удаляем docker-compose.override.yml если он вдруг есть (от прошлых тестов)
+rm -f docker-compose.override.yml
+
+# Создаем librechat.yaml из примера, если его нет
+if [ ! -f "librechat.yaml" ]; then
+    if [ -f "librechat.example.yaml" ]; then
+        cp librechat.example.yaml librechat.yaml
+        log "Файл настройки librechat.yaml создан из примера."
+    else
+        warn "librechat.example.yaml не найден, создание конфига пропущено."
+    fi
+fi
+
+# Начинаем формировать Override файл
+# Обязательно добавляем volume mapping для конфига
+echo "services:" > docker-compose.override.yml
+echo "  api:" >> docker-compose.override.yml
+echo "    volumes:" >> docker-compose.override.yml
+echo "      - ./librechat.yaml:/app/librechat.yaml" >> docker-compose.override.yml
+
+# 9. Проверка порта
+DEFAULT_PORT=3080
+TARGET_PORT=$DEFAULT_PORT
+
+log "Проверка порта $DEFAULT_PORT..."
+if netstat -tuln | grep -q ":$DEFAULT_PORT "; then
+    warn "Порт $DEFAULT_PORT занят!"
     read -p "Сменить порт LibreChat на 3081? (y/n): " port_change
     if [[ "$port_change" == "y" ]]; then
-        cat <<EOF > docker-compose.override.yml
-services:
-  api:
-    ports:
-      - "3081:3080"
-EOF
-        PORT=3081
-        log "Порт изменен на 3081."
+        TARGET_PORT=3081
+        # Дописываем изменение порта в Override файл
+        echo "    ports:" >> docker-compose.override.yml
+        echo "      - \"3081:3080\"" >> docker-compose.override.yml
+        log "Порт изменен на 3081 в docker-compose.override.yml"
     else
-        err "Пожалуйста, освободите порт 3080."
+        err "Освободите порт $DEFAULT_PORT."
         exit 1
     fi
 else
-    PORT=3080
+    # Порт свободен, используем стандартный
+    TARGET_PORT=3080
 fi
 
-# 9. Запуск
+# 10. Запуск
 echo -e ""
-log "Запуск контейнеров используя команду: $DOCKER_COMPOSE_CMD up -d"
+log "Запуск контейнеров..."
 $DOCKER_COMPOSE_CMD up -d
 
-# 10. Финал
+# 11. Финал
 echo -e ""
 echo -e "${GREEN}====================================================${NC}"
-echo -e "${GREEN}   LibreChat установлен и запущен!   ${NC}"
+echo -e "${GREEN}   LibreChat успешно установлен! (v2.3)   ${NC}"
 echo -e "${GREEN}====================================================${NC}"
 echo -e ""
-echo -e "Для Cloudflare Tunnel направьте трафик на:"
-echo -e "${YELLOW}http://localhost:$PORT${NC}"
+echo -e "Файл детальных настроек создан:"
+echo -e "${BLUE}$INSTALL_DIR/librechat.yaml${NC}"
+echo -e "(Редактируйте его для настройки моделей, иконок и пресетов)"
 echo -e ""
-echo -e "Локальная папка: $INSTALL_DIR"
-echo -e "Управление:"
-echo -e "  Остановить:    cd $INSTALL_DIR && $DOCKER_COMPOSE_CMD down"
-echo -e "  Перезапустить: cd $INSTALL_DIR && $DOCKER_COMPOSE_CMD restart"
+echo -e "Адрес сервиса (для Cloudflare Tunnel):"
+echo -e "${YELLOW}http://localhost:$TARGET_PORT${NC}"
+echo -e ""
+echo -e "Команда перезагрузки (после правки конфигов):"
+echo -e "cd $INSTALL_DIR && $DOCKER_COMPOSE_CMD restart"
 echo -e ""
