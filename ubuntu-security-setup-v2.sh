@@ -3,7 +3,7 @@
 # Скрипт первоначальной настройки безопасности и оптимизации Ubuntu сервера
 # Автор: kukoboris (Refactored by Antigravity)
 # Дата: 13.01.2026
-# Версия: 2.1 (ZT Bunker Standard)
+# Версия: 2.2 (ZT Bunker Standard)
 
 # 0. Safety & Standards check
 set -euo pipefail
@@ -56,14 +56,14 @@ fi
 # Приветственное сообщение
 clear
 echo "================================================================================"
-echo "               Скрипт настройки безопасности Ubuntu (v2.1)                    "
+echo "               Скрипт настройки безопасности Ubuntu (v2.2)                    "
 echo "               Стандарт: ZT Bunker (Idempotent Edition)                        "
 echo "================================================================================"
 echo ""
 print_warning "Этот скрипт выполнит комплексную настройку безопасности сервера."
 echo ""
 
-read -p "Желаете продолжить? (y/n): " -n 1 -r
+read -rp "Желаете продолжить? (y/n): " -n 1 -r
 echo ""
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
@@ -113,36 +113,41 @@ read -rp "Желаете подтянуть SSH ключи из GitHub? (y/n) [y
 FETCH_GH=${FETCH_GH:-y}
 
 if [[ $FETCH_GH =~ ^[Yy]$ ]]; then
-    read -rp "Введите GitHub username [kukoboris]: " GH_USER
-    GH_USER=${GH_USER:-kukoboris}
+    read -rp "Введите GitHub username: " GH_USER
     
-    print_info "Загрузка ключей для пользователя $GH_USER..."
-    # Пытаемся скачать ключи
-    if GH_KEYS=$(curl -fsSL "https://github.com/${GH_USER}.keys") && [[ -n "$GH_KEYS" ]]; then
-        ADDED_COUNT=0
-        # Читаем построчно, чтобы проверить каждый ключ на дубликат
-        while IFS= read -r key; do
-            if [[ -n "$key" && "$key" == ssh-* ]]; then
-                if ! grep -qF "$key" "$AUTH_KEYS"; then
-                    echo "$key" >> "$AUTH_KEYS"
-                    ADDED_COUNT=$((ADDED_COUNT+1))
-                fi
-            fi
-        done <<< "$GH_KEYS"
-        
-        if [ "$ADDED_COUNT" -gt 0 ]; then
-            print_success "Добавлено ключей из GitHub: $ADDED_COUNT"
-        else
-            print_info "Все ключи из GitHub уже были добавлены ранее."
-        fi
+    if [[ -z "$GH_USER" ]]; then
+        print_error "Username не может быть пустым."
+        MANUAL_KEYS=y
     else
-        print_error "Не удалось получить ключи из GitHub. Возможно, пользователь не найден или нет интернета."
-        read -rp "Добавить ключ вручную? (y/n): " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            MANUAL_KEYS=y
-        else
+        print_info "Загрузка ключей для пользователя $GH_USER..."
+        # Пытаемся скачать ключи
+        if GH_KEYS=$(curl -fsSL "https://github.com/${GH_USER}.keys") && [[ -n "$GH_KEYS" ]]; then
+            ADDED_COUNT=0
+            # Читаем построчно, чтобы проверить каждый ключ на дубликат
+            while IFS= read -r key; do
+                if [[ -n "$key" && "$key" == ssh-* ]]; then
+                    if ! grep -qF "$key" "$AUTH_KEYS"; then
+                        echo "$key" >> "$AUTH_KEYS"
+                        ADDED_COUNT=$((ADDED_COUNT+1))
+                    fi
+                fi
+            done <<< "$GH_KEYS"
+            
+            if [ "$ADDED_COUNT" -gt 0 ]; then
+                print_success "Добавлено ключей из GitHub: $ADDED_COUNT"
+            else
+                print_info "Все ключи из GitHub уже были добавлены ранее."
+            fi
             MANUAL_KEYS=n
+        else
+            print_error "Не удалось получить ключи из GitHub. Возможно, пользователь не найден или нет интернета."
+            read -rp "Добавить ключ вручную? (y/n): " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                MANUAL_KEYS=y
+            else
+                MANUAL_KEYS=n
+            fi
         fi
     fi
 else
