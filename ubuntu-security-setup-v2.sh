@@ -108,15 +108,53 @@ if [ ! -d "$SSH_DIR" ]; then
     chown -R "$NEW_USER":"$NEW_USER" "$SSH_DIR"
 fi
 
-# Добавление публичного ключа (Идемпотентно)
-read -p "Желаете добавить публичный SSH ключ? (y/n): " -n 1 -r
-echo ""
-if [[ $REPLY =~ ^[Yy]$ ]]; then
+# Добавление публичного ключа
+read -rp "Желаете подтянуть SSH ключи из GitHub? (y/n) [y]: " FETCH_GH
+FETCH_GH=${FETCH_GH:-y}
+
+if [[ $FETCH_GH =~ ^[Yy]$ ]]; then
+    read -rp "Введите GitHub username [kukoboris]: " GH_USER
+    GH_USER=${GH_USER:-kukoboris}
+    
+    print_info "Загрузка ключей для пользователя $GH_USER..."
+    # Пытаемся скачать ключи
+    if GH_KEYS=$(curl -fsSL "https://github.com/${GH_USER}.keys") && [[ -n "$GH_KEYS" ]]; then
+        ADDED_COUNT=0
+        # Читаем построчно, чтобы проверить каждый ключ на дубликат
+        while IFS= read -r key; do
+            if [[ -n "$key" && "$key" == ssh-* ]]; then
+                if ! grep -qF "$key" "$AUTH_KEYS"; then
+                    echo "$key" >> "$AUTH_KEYS"
+                    ADDED_COUNT=$((ADDED_COUNT+1))
+                fi
+            fi
+        done <<< "$GH_KEYS"
+        
+        if [ "$ADDED_COUNT" -gt 0 ]; then
+            print_success "Добавлено ключей из GitHub: $ADDED_COUNT"
+        else
+            print_info "Все ключи из GitHub уже были добавлены ранее."
+        fi
+    else
+        print_error "Не удалось получить ключи из GitHub. Возможно, пользователь не найден или нет интернета."
+        read -rp "Добавить ключ вручную? (y/n): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            MANUAL_KEYS=y
+        else
+            MANUAL_KEYS=n
+        fi
+    fi
+else
+    MANUAL_KEYS=y
+fi
+
+# План Б: Ручное добавление ключа
+if [[ ${MANUAL_KEYS:-n} == "y" ]]; then
     while true; do
-        read -r -p "Введите ключ (или оставьте пустым для пропуска): " SSH_KEY
+        read -r -p "Введите ваш публичный SSH ключ (или оставьте пустым): " SSH_KEY
         if [[ -z "$SSH_KEY" ]]; then break; fi
         
-        # Проверяем валидность и наличие ключа в файле
         if echo "$SSH_KEY" | ssh-keygen -l -f - >/dev/null 2>&1; then
             if ! grep -qF "$SSH_KEY" "$AUTH_KEYS"; then
                 echo "$SSH_KEY" >> "$AUTH_KEYS"
