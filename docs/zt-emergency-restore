@@ -1,0 +1,206 @@
+#!/bin/bash
+
+# ==============================================================================
+# ZT BUNKER: TOTAL EMERGENCY RESTORE (V3.1 - MASTER STANDARD)
+# Режим: डिजाстер रिकवरी (Disaster Recovery)
+# ==============================================================================
+
+set -euo pipefail
+# Блокировка от параллельного запуска (Rule #3)
+exec 9>/var/lock/zt-restore.lock
+if ! flock -n 9; then
+    echo "❌ Ошибка: Скрипт восстановления уже запущен другим процессом."
+    exit 1
+fi
+
+# --- Ключевые настройки ---
+REPO_URL="git@github.com:kukoboris/bunker-iac.git"
+IAC_DIR="/opt/bunker-iac"
+LOG_FILE="/var/log/zt-restore.log"
+BORG_SSH_COMMAND="ssh -p 23 -o StrictHostKeyChecking=accept-new"
+
+# План восстановления данных
+# Формат: "APP:CONTAINER:DUMP_FILE:RESTORE_CMD"
+RECOVERY_PLAN=(
+    "n8n:n8n-n8n-db-1:n8n_pg_dump.sql.gz:psql -U n8n_admin -d n8n_db"
+    "forgejo:forgejo-db:forgejo_pg_dump.sql.gz:psql -U forgejo -d forgejo"
+    "LibreChat:chat-mongodb:mongo_dump.gz:mongorestore --archive --gzip --drop"
+    "LibreChat:vectordb:pg_dump.sql.gz:psql -U myuser -d postgres"
+)
+
+# --- Утилиты вывода ---
+log() { echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"; }
+print_warning() { echo -e "\e[33m⚠️ $1\e[0m"; }
+print_error()   { echo -e "\e[31m❌ $1\e[0m"; }
+print_info()    { echo -e "\e[34mℹ️ $1\e[0m"; }
+print_success() { echo -e "\e[32m✅ $1\e[0m"; }
+
+error_exit() {
+    log "❌ КРИТИЧЕСКАЯ ОШИБКА: $1"
+    [[ -f "/usr/local/bin/telegram-send" ]] && /usr/local/bin/telegram-send "🚨 <b>ZT BUNKER: RECOVERY FAILED!</b>\n\nОшибка: <code>$1</code>" || true
+    exit 1
+}
+
+wait_for_container() {
+    local container=$1
+    local timeout=60
+    local elapsed=0
+    log "⏳ Ожидаю готовности контейнера $container..."
+    while [ $elapsed -lt $timeout ]; do
+        if docker inspect -f '{{.State.Running}}' "$container" &>/dev/null; then
+            local health
+            health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}' "$container")
+            if [[ "$health" == "healthy" || "$health" == "running" ]]; then
+                log "  ✅ Контейнер $container готов."
+                return 0
+            fi
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    error_exit "Контейнер $container не поднялся за $timeout секунд."
+}
+
+cleanup() {
+    log "🧹 Финальная очистка..."
+    rm -f /opt/*.gz /opt/*.sql || true
+}
+trap cleanup EXIT
+
+# ==============================================================================
+# 🏗 СТАДИЯ 0: Инициализация и SSH
+# ==============================================================================
+log "🚀 Запуск процесса TOTAL RECOVERY..."
+[[ $EUID -ne 0 ]] && error_exit "Запустите от имени root!"
+
+log "📦 Проверка зависимостей..."
+apt-get update -qq && apt-get install -y -qq git curl docker.io docker-compose-v2 >/dev/null
+
+# Решаем вопрос с docker-compose vs docker compose
+if ! command -v docker-compose &>/dev/null; then
+    ln -s /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose || true
+fi
+
+# ПРОВЕРКА ФИЗИЧЕСКОГО КЛЮЧА
+if [[ ! -f ~/.ssh/id_ed25519 ]]; then
+    print_warning "У сервера нет локального SSH ключа."
+    echo -e "\n\e[34mВыберите способ настройки:\e[0m"
+    echo "1) Вставить мастер-ключ из 1Password (РЕКОМЕНДУЕТСЯ)"
+    echo "2) Сгенерировать новый ключ прямо сейчас"
+    read -rp "Ваш выбор [1/2]: " SSH_CHOICE
+
+    mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    if [[ "$SSH_CHOICE" == "1" ]]; then
+        echo -e "\e[34mВставьте содержимое ПРИВАТНОГО ключа и нажмите Ctrl+D:\e[0m"
+        cat > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+    else
+        ssh-keygen -t ed25519 -C "Bunker-Restore-$(hostname)" -f ~/.ssh/id_ed25519 -N ""
+    fi
+fi
+
+# Проверка доступа к GitHub
+while true; do
+    if ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+        log "✅ Локальный SSH ключ авторизован в GitHub."
+        break
+    fi
+    print_error "Нет доступа к GitHub!"
+    echo -e "\e[34mДобавьте этот ПУБЛИЧНЫЙ ключ в GitHub Deploy Keys:\e[0m"
+    cat ~/.ssh/id_ed25519.pub
+    read -rp "Нажмите [Enter] после добавления..."
+done
+
+log "📂 Синхронизация репозитория IaC..."
+[[ ! -d "$IAC_DIR" ]] && git clone "$REPO_URL" "$IAC_DIR"
+cd "$IAC_DIR" && git pull --rebase
+
+# Установка пакетов
+if [[ -f "$IAC_DIR/system/packages.list" ]]; then
+    log "📦 Установка системных пакетов из IaC..."
+    mapfile -t PKGS < <(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$IAC_DIR/system/packages.list")
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PKGS[@]}"
+fi
+
+# ==============================================================================
+# 📥 СТАДИЯ 2: Данные и Бэкап
+# ==============================================================================
+log "🛡 Применение стандартов ZT Bunker (apply-bunker-iac)..."
+cp "$IAC_DIR/usr_local_bin/apply-bunker-iac" "/usr/local/bin/" && chmod 755 "/usr/local/bin/apply-bunker-iac"
+/usr/local/bin/apply-bunker-iac --force
+
+# Проверка связи с Hetzner
+STORAGE_HOST=$(grep -oE "[a-z0-9]+\.your-storagebox\.de" /etc/borgmatic/config.yaml | head -n1 || echo "")
+if [[ -n "$STORAGE_HOST" ]]; then
+    if ! ssh -p 23 -o BatchMode=yes "$STORAGE_HOST" "ls" &>/dev/null; then
+        print_warning "Нет прямого доступа к Hetzner Storage Box ($STORAGE_HOST)."
+        read -rp "Продолжить запуск? (y/n) [y]: " CONTINUE_BORG
+        [[ ! $CONTINUE_BORG =~ ^[Yy]$ ]] && exit 1
+    fi
+fi
+
+if [[ -z "${BORG_PASSPHRASE:-}" ]]; then
+    read -rs -p "Введите BORG_PASSPHRASE: " BORG_PASSPHRASE; export BORG_PASSPHRASE; echo ""
+fi
+
+# Инъекция пароля
+sed -i "s|^.*encryption_passphrase:.*$|    encryption_passphrase: \"$BORG_PASSPHRASE\"|" /etc/borgmatic/config.yaml
+
+log "🔍 Поиск архивов..."
+export BORG_RSH="$BORG_SSH_COMMAND"
+mapfile -t ARCHIVES < <(borgmatic list 2>&1 | grep -E "^[a-zA-Z0-9].*:[0-9]{4}-" | sort -r | head -n 5)
+[[ ${#ARCHIVES[@]} -eq 0 ]] && error_exit "Архивы не найдены. Проверьте пароль."
+
+for i in "${!ARCHIVES[@]}"; do echo "[$i] ${ARCHIVES[$i]}"; done
+read -rp "🎯 Выберите номер архива [0]: " ARCH_IDX; ARCH_IDX=${ARCH_IDX:-0}
+SELECTED_ARCHIVE="${ARCHIVES[$ARCH_IDX]%% *}"
+
+log "📥 Извлечение данных системных папок из $SELECTED_ARCHIVE..."
+borgmatic extract --archive "$SELECTED_ARCHIVE" --path opt etc/zt-bunker
+
+# ==============================================================================
+# 🏗 СТАДИЯ 3: Воскрешение сервисов
+# ==============================================================================
+for ENTRY in "${RECOVERY_PLAN[@]}"; do
+    IFS=':' read -r APP CONTAINER DUMP_FILE RESTORE_CMD <<< "$ENTRY"
+    log "🚀 Восстановление $APP..."
+    
+    [[ ! -d "/opt/$APP" ]] && { print_warning "Папка /opt/$APP не найдена в архиве!"; continue; }
+    
+    cd "/opt/$APP"
+    docker-compose up -d
+    wait_for_container "$CONTAINER"
+
+    log "  📥 Импорт базы данных..."
+    if [[ ! -f "/opt/$DUMP_FILE" ]]; then
+        print_error "Дамп базы $DUMP_FILE не найден!"
+        continue
+    fi
+
+    if [[ "$DUMP_FILE" == *.gz ]]; then
+        gunzip -c "/opt/$DUMP_FILE" | docker exec -i "$CONTAINER" sh -c "$RESTORE_CMD" || print_error "Ошибка импорта базы $APP"
+    else
+        docker exec -i "$CONTAINER" sh -c "$RESTORE_CMD" < "/opt/$DUMP_FILE" || print_error "Ошибка импорта базы $APP"
+    fi
+done
+
+# ==============================================================================
+# ✅ СТАДИЯ 4: Финальная проверка
+# ==============================================================================
+log "🩺 Финальная диагностика сервисов..."
+HEALTH_CHECKS=(
+    "n8n:localhost:5678/healthz"
+    "Forgejo:localhost:3000"
+)
+
+for CHECK in "${HEALTH_CHECKS[@]}"; do
+    IFS=':' read -r NAME URL <<< "$CHECK"
+    if curl -s -f "http://$URL" > /dev/null; then
+        print_success "$NAME: ДОСТУПЕН"
+    else
+        print_warning "$NAME: НЕ ОТВЕЧАЕТ"
+    fi
+done
+
+log "🎉 ВОССТАНОВЛЕНИЕ ЗАВЕРШЕНО!"
+[[ -f "/usr/local/bin/telegram-send" ]] && /usr/local/bin/telegram-send "✅ <b>ZT BUNKER: RECOVERY SUCCESS!</b>" || true
