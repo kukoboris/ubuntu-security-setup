@@ -50,7 +50,14 @@ sysctl -p /etc/sysctl.d/99-tailscale.conf > /dev/null
 # --- 2. Установка Tailscale ---
 if ! command -v tailscale &> /dev/null; then
     print_info "Шаг 2: Установка Tailscale..."
-    curl -fsSL https://tailscale.com/install.sh | sh
+    TEMP_INSTALL_SCRIPT=$(mktemp /tmp/tailscale_install.XXXXXX.sh)
+    if curl -fsSL https://tailscale.com/install.sh -o "$TEMP_INSTALL_SCRIPT"; then
+        sh "$TEMP_INSTALL_SCRIPT"
+        rm -f "$TEMP_INSTALL_SCRIPT"
+    else
+        rm -f "$TEMP_INSTALL_SCRIPT"
+        error_exit "Failed to download Tailscale install script."
+    fi
 else
     print_success "Tailscale уже установлен."
 fi
