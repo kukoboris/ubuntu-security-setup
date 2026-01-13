@@ -83,7 +83,7 @@ apt-get autoclean
 
 # 2. Создание пользователя
 print_info "Шаг 2: Создание пользователя администратора..."
-read -p "Введите имя нового пользователя [kerstin]: " NEW_USER
+read -rp "Введите имя нового пользователя [kerstin]: " NEW_USER
 NEW_USER=${NEW_USER:-kerstin}
 
 if id "$NEW_USER" &>/dev/null; then
@@ -135,7 +135,7 @@ fi
 print_info "Шаг 3: Настройка SSH..."
 [ ! -f /etc/ssh/sshd_config.bak ] && cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
 
-read -p "Введите порт SSH [22]: " SSH_PORT
+read -rp "Введите порт SSH [22]: " SSH_PORT
 SSH_PORT=${SSH_PORT:-22}
 
 # Применяем настройки через функцию set_config_value
@@ -193,8 +193,8 @@ dpkg-reconfigure -f noninteractive unattended-upgrades
 
 # 7. Утилиты (Идемпотентно через apt)
 print_info "Шаг 7: Установка базовых утилит..."
-UTILS="htop iotop iftop net-tools curl wget vim nmap tcpdump lynis rkhunter chkrootkit mtr-tiny needrestart"
-apt-get install -y $UTILS >/dev/null
+UTILS=(htop iotop iftop net-tools curl wget vim nmap tcpdump lynis rkhunter chkrootkit mtr-tiny needrestart)
+apt-get install -y "${UTILS[@]}" >/dev/null
 
 # 8. Параметры Ядра (Sysctl)
 print_info "Шаг 8: Оптимизация ядра (sysctl)..."
