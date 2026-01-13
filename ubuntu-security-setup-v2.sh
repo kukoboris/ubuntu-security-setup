@@ -7,6 +7,11 @@
 
 # 0. Safety & Standards check
 set -euo pipefail
+exec 7>/var/lock/zt-os-setup.lock
+if ! flock -n 7; then
+    echo "❌ Ошибка: Скрипт уже запущен."
+    exit 1
+fi
 trap 'echo "Error on line $LINENO. Local changes might be partial." >&2' ERR
 
 # Проверка прав администратора
@@ -32,7 +37,6 @@ check_status() {
 }
 
 # Функция для идемпотентного изменения конфигов (key-value)
-# Usage: set_config_value "/etc/ssh/sshd_config" "Port" "2222" " "
 set_config_value() {
     local file=$1
     local key=$2
@@ -120,10 +124,8 @@ if [[ $FETCH_GH =~ ^[Yy]$ ]]; then
         MANUAL_KEYS=y
     else
         print_info "Загрузка ключей для пользователя $GH_USER..."
-        # Пытаемся скачать ключи
         if GH_KEYS=$(curl -fsSL "https://github.com/${GH_USER}.keys") && [[ -n "$GH_KEYS" ]]; then
             ADDED_COUNT=0
-            # Читаем построчно, чтобы проверить каждый ключ на дубликат
             while IFS= read -r key; do
                 if [[ -n "$key" && "$key" == ssh-* ]]; then
                     if ! grep -qF "$key" "$AUTH_KEYS"; then
@@ -181,7 +183,6 @@ print_info "Шаг 3: Настройка SSH..."
 read -rp "Введите порт SSH [22]: " SSH_PORT
 SSH_PORT=${SSH_PORT:-22}
 
-# Применяем настройки через функцию set_config_value
 set_config_value "/etc/ssh/sshd_config" "Port" "$SSH_PORT"
 set_config_value "/etc/ssh/sshd_config" "PermitRootLogin" "no"
 set_config_value "/etc/ssh/sshd_config" "PasswordAuthentication" "no"
@@ -191,9 +192,7 @@ set_config_value "/etc/ssh/sshd_config" "ClientAliveInterval" "300"
 set_config_value "/etc/ssh/sshd_config" "ClientAliveCountMax" "2"
 set_config_value "/etc/ssh/sshd_config" "PubkeyAuthentication" "yes"
 
-# Добавляем AllowUsers только если его еще нет
 if ! grep -q "^AllowUsers.*$NEW_USER" /etc/ssh/sshd_config; then
-    # Если строка AllowUsers вообще есть, добавляем к ней, иначе создаем
     if grep -q "^AllowUsers" /etc/ssh/sshd_config; then
         sed -i "/^AllowUsers/ s/$/ $NEW_USER/" /etc/ssh/sshd_config
     else
@@ -204,7 +203,7 @@ fi
 # 4. Файрвол UFW (Идемпотентно)
 print_info "Шаг 4: Настройка файрвола..."
 apt-get install -y ufw >/dev/null
-ufw --force reset # Сброс старых правил для чистоты (опционально, но лучше для setup)
+ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow "$SSH_PORT/tcp"
