@@ -109,7 +109,7 @@ if [ ! -d "$SSH_DIR" ]; then
 fi
 
 # Добавление публичного ключа
-read -rp "Желаете подтянуть SSH ключи из GitHub? (y/n) [y]: " FETCH_GH
+read -rp "Подтянуть SSH ключи из GitHub? (введите 'n' если нет аккаунта) (y/n) [y]: " FETCH_GH
 FETCH_GH=${FETCH_GH:-y}
 
 if [[ $FETCH_GH =~ ^[Yy]$ ]]; then
